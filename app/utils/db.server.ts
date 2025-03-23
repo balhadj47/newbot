@@ -110,25 +110,81 @@ export function deleteCommand(id: number) {
 }
 
 // Helper functions for logs
-export function getLogs(limit = 100) {
-  return Object.values(db.logs)
-    .sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-    .slice(0, limit);
+export function getLogs(limit = 100, type = null, search = null, timeFilter = null) {
+  let logs = Object.values(db.logs);
+  
+  // Filter by type if specified
+  if (type && type !== "ALL") {
+    logs = logs.filter((log: any) => log.type === type);
+  }
+  
+  // Filter by search term if specified
+  if (search) {
+    const searchLower = search.toLowerCase();
+    logs = logs.filter((log: any) => 
+      log.message.toLowerCase().includes(searchLower) || 
+      (log.data && log.data.toLowerCase().includes(searchLower))
+    );
+  }
+  
+  // Filter by time if specified
+  if (timeFilter) {
+    logs = logs.filter((log: any) => log.timestamp >= timeFilter);
+  }
+  
+  // Sort by timestamp (newest first)
+  logs = logs.sort((a: any, b: any) => 
+    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+  
+  // Limit the number of logs
+  return logs.slice(0, limit);
 }
 
 export function addLog(type: string, message: string, data?: any) {
   counters.logs++;
   const now = new Date().toISOString();
   
+  // Stringify data if it's not already a string
+  let dataStr = null;
+  if (data !== null && data !== undefined) {
+    try {
+      dataStr = typeof data === 'string' ? data : JSON.stringify(data);
+    } catch (e) {
+      dataStr = "[Circular or non-serializable data]";
+    }
+  }
+  
   db.logs[counters.logs] = {
     id: counters.logs,
     type,
     message,
-    data: data ? JSON.stringify(data) : null,
+    data: dataStr,
     timestamp: now
   };
   
   return { changes: 1, lastInsertRowid: counters.logs };
+}
+
+export function clearLogs() {
+  const count = Object.keys(db.logs).length;
+  db.logs = {};
+  return { changes: count };
+}
+
+export function getLogStats() {
+  const logs = Object.values(db.logs);
+  
+  return {
+    total: logs.length,
+    error: logs.filter((log: any) => log.type === 'ERROR').length,
+    warning: logs.filter((log: any) => log.type === 'WARNING').length,
+    success: logs.filter((log: any) => log.type === 'SUCCESS').length,
+    info: logs.filter((log: any) => 
+      log.type === 'INFO' || 
+      (log.type !== 'ERROR' && log.type !== 'WARNING' && log.type !== 'SUCCESS')
+    ).length
+  };
 }
 
 // Add some initial data for testing
