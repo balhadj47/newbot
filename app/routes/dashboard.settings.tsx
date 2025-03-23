@@ -1,146 +1,168 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
-import { json } from "@remix-run/node";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import MainLayout from "~/components/layout/MainLayout";
+import WebhookHelper from "~/components/ui/WebhookHelper";
 import { getBotSettings } from "~/utils/db.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const settings = getBotSettings();
-  
-  return json({
-    settings
-  });
-}
-
-export default function Settings() {
-  const { settings } = useLoaderData<typeof loader>();
+export default function BotSettings() {
+  const { token, webhook_url } = useLoaderData<typeof loader>();
+  const [showToken, setShowToken] = useState(false);
+  const [tokenInput, setTokenInput] = useState(token || "");
+  const [webhookInput, setWebhookInput] = useState(webhook_url || "");
+  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
   const fetcher = useFetcher();
-  
-  const [newToken, setNewToken] = useState("");
-  const [webhookUrl, setWebhookUrl] = useState(settings.webhook_url || "");
-  const [isTokenHidden, setIsTokenHidden] = useState(true);
-  
+
+  const maskToken = (token: string) => {
+    // If token starts with "••••••••", it's already masked
+    if (token.startsWith("••••••••")) return token;
+    return "••••••••" + token.slice(-4);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
     fetcher.submit(
       { 
-        token: newToken || settings.token,
-        webhookUrl
+        token: tokenInput,
+        webhookUrl: webhookInput
       },
       { method: "post", action: "/api/settings" }
     );
   };
-  
+
+  const testWebhook = () => {
+    if (!webhookInput) {
+      return;
+    }
+    
+    setIsTestingWebhook(true);
+    fetcher.submit(
+      {
+        token: tokenInput,
+        webhookUrl: webhookInput,
+        testOnly: "true"
+      },
+      { method: "post", action: "/api/settings" }
+    );
+  };
+
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data) {
+      setIsTestingWebhook(false);
+    }
+  }, [fetcher.state, fetcher.data]);
+
   return (
-    <div>
-      <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-6">Bot Settings</h1>
-      
-      <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
-        <fetcher.Form method="post" onSubmit={handleSubmit}>
-          <div className="space-y-6">
+    <MainLayout>
+      <div className="container mx-auto py-8 px-4">
+        <h1 className="text-3xl font-bold mb-6 text-gray-800 dark:text-white">Bot Settings</h1>
+        
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+          <h2 className="text-xl font-semibold mb-4 text-gray-700 dark:text-gray-200">Configuration</h2>
+          
+          <fetcher.Form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <label htmlFor="token" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Bot Token
+              <label htmlFor="token" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Bot Token <span className="text-red-500">*</span>
               </label>
-              <div className="mt-1 relative rounded-md shadow-sm">
+              <div className="relative">
                 <input
-                  type={isTokenHidden ? "password" : "text"}
-                  name="token"
+                  type={showToken ? "text" : "password"}
                   id="token"
-                  className="block w-full pr-10 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                  placeholder={settings.token ? "Current token is set" : "Enter your bot token"}
-                  onChange={(e) => setNewToken(e.target.value)}
+                  name="token"
+                  value={tokenInput}
+                  onChange={(e) => setTokenInput(e.target.value)}
+                  className="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  placeholder="Enter your Telegram bot token"
+                  required
                 />
                 <button
                   type="button"
-                  className="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 dark:text-gray-400"
-                  onClick={() => setIsTokenHidden(!isTokenHidden)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-sm text-gray-500 dark:text-gray-400"
+                  onClick={() => setShowToken(!showToken)}
                 >
-                  {isTokenHidden ? "Show" : "Hide"}
+                  {showToken ? "Hide" : "Show"}
                 </button>
               </div>
-              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                You can get this from @BotFather on Telegram.
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Get your token from <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">@BotFather</a> on Telegram
               </p>
             </div>
             
             <div>
-              <label htmlFor="webhookUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Webhook URL (Optional)
+              <label htmlFor="webhookUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Webhook URL
               </label>
-              <div className="mt-1">
+              <div className="flex gap-2">
                 <input
-                  type="text"
-                  name="webhookUrl"
+                  type="url"
                   id="webhookUrl"
-                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                  placeholder="https://your-domain.com/api/webhook"
-                  value={webhookUrl}
-                  onChange={(e) => setWebhookUrl(e.target.value)}
+                  name="webhookUrl"
+                  value={webhookInput}
+                  onChange={(e) => setWebhookInput(e.target.value)}
+                  className="flex-1 p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  placeholder="https://yourdomain.com/api/webhook"
                 />
+                <button
+                  type="button"
+                  onClick={testWebhook}
+                  disabled={!webhookInput || isTestingWebhook}
+                  className="bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium py-2 px-4 rounded disabled:opacity-50"
+                >
+                  {isTestingWebhook ? "Testing..." : "Test Webhook"}
+                </button>
               </div>
-              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                If you want to use webhooks instead of polling, enter your public URL here.
-                <br />
-                Your webhook endpoint is: <code className="px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-900">/api/webhook</code>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                URL where Telegram will send updates. Leave empty to use polling method instead.
               </p>
             </div>
             
-            <div className="flex justify-end">
+            <WebhookHelper currentWebhookUrl={webhook_url} />
+            
+            <div>
               <button
                 type="submit"
-                className="inline-flex justify-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded disabled:opacity-50"
+                disabled={fetcher.state === "submitting" && !isTestingWebhook}
               >
-                {fetcher.state === "submitting" ? "Saving..." : "Save Settings"}
+                {fetcher.state === "submitting" && !isTestingWebhook ? "Saving..." : "Save Settings"}
               </button>
             </div>
-            
-            {fetcher.data?.message && (
-              <div className={`p-3 rounded ${
-                fetcher.data.success 
-                  ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-100" 
-                  : "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-100"
-              }`}>
-                {fetcher.data.message}
-              </div>
-            )}
-          </div>
-        </fetcher.Form>
-      </div>
-      
-      <div className="mt-8 bg-white dark:bg-gray-800 shadow rounded-lg p-6">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-          How to Use This Bot
-        </h2>
-        <div className="prose dark:prose-invert">
-          <ol className="space-y-4 text-gray-700 dark:text-gray-300">
-            <li>
-              <span className="font-medium">Create a bot with BotFather:</span> Chat with 
-              <a 
-                href="https://t.me/BotFather" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-blue-600 dark:text-blue-400 hover:underline"
-              >
-                @BotFather
-              </a> on Telegram and use the /newbot command to create a new bot.
-            </li>
-            <li>
-              <span className="font-medium">Get your bot token:</span> BotFather will provide you with a token. Copy and paste it in the "Bot Token" field above.
-            </li>
-            <li>
-              <span className="font-medium">Configure commands:</span> Use the Commands page to set up the commands your bot will respond to.
-            </li>
-            <li>
-              <span className="font-medium">Start your bot:</span> Go to the Dashboard and click the "Start Bot" button.
-            </li>
-            <li>
-              <span className="font-medium">Interact with your bot:</span> Find your bot on Telegram by its username and start chatting!
-            </li>
-          </ol>
+          </fetcher.Form>
+          
+          {fetcher.data?.message && (
+            <div className={`mt-4 p-3 rounded ${
+              fetcher.data.success 
+                ? "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-100" 
+                : "bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-100"
+            }`}>
+              {fetcher.data.message}
+              
+              {fetcher.data.webhookInfo && (
+                <div className="mt-2 text-sm">
+                  <p><strong>Webhook URL:</strong> {fetcher.data.webhookInfo.url || "None"}</p>
+                  {fetcher.data.webhookInfo.last_error_date && (
+                    <p><strong>Last Error:</strong> {fetcher.data.webhookInfo.last_error_message}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
-    </div>
+    </MainLayout>
   );
 }
+
+export const loader = async () => {
+  // Get actual settings from the database
+  const settings = getBotSettings();
+  
+  // Mask the token for security
+  const safeSettings = {
+    ...settings,
+    token: settings.token ? "••••••••" + settings.token.slice(-4) : "YOUR_TOKEN_HERE"
+  };
+  
+  return json(safeSettings);
+};

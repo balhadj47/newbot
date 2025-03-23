@@ -17,11 +17,45 @@ export async function initBot(token: string, webhookUrl?: string): Promise<void>
 
   try {
     bot = new Telegraf(token);
+    addLog("INFO", "Bot instance created with provided token");
     
     // Set up webhook if URL is provided
     if (webhookUrl) {
-      await bot.telegram.setWebhook(webhookUrl);
-      addLog("INFO", `Webhook set to ${webhookUrl}`);
+      try {
+        // First, check current webhook status
+        const webhookInfo = await bot.telegram.getWebhookInfo();
+        addLog("INFO", `Current webhook status: ${JSON.stringify(webhookInfo)}`);
+        
+        // Delete any existing webhook first to ensure clean setup
+        await bot.telegram.deleteWebhook();
+        addLog("INFO", "Deleted existing webhook configuration");
+        
+        // Set the webhook - IMPORTANT: this must match exactly what your Remix route expects
+        await bot.telegram.setWebhook(webhookUrl, {
+          drop_pending_updates: true
+        });
+        addLog("INFO", `Webhook set request sent to: ${webhookUrl}`);
+        
+        // Verify the webhook was set correctly
+        const newWebhookInfo = await bot.telegram.getWebhookInfo();
+        addLog("INFO", `New webhook status: ${JSON.stringify(newWebhookInfo)}`);
+        
+        if (newWebhookInfo.url === webhookUrl) {
+          addLog("SUCCESS", `Webhook successfully set to ${webhookUrl}`);
+        } else {
+          addLog("ERROR", `Failed to set webhook. Expected ${webhookUrl} but got ${newWebhookInfo.url || 'none'}`);
+          if (newWebhookInfo.last_error_message) {
+            addLog("ERROR", `Telegram error: ${newWebhookInfo.last_error_message}`);
+          }
+        }
+      } catch (error) {
+        addLog("ERROR", `Webhook setup failed: ${JSON.stringify(error)}`, error);
+        throw error;
+      }
+    } else {
+      // If no webhook, ensure any existing webhook is removed and use polling
+      await bot.telegram.deleteWebhook();
+      addLog("INFO", "No webhook URL provided, using long polling mode");
     }
 
     // Register all command handlers from the database
@@ -95,6 +129,8 @@ export async function initBot(token: string, webhookUrl?: string): Promise<void>
     if (!webhookUrl) {
       await bot.launch();
       addLog("INFO", "Bot started with long polling");
+    } else {
+      addLog("INFO", "Bot configured to use webhook mode");
     }
 
     setBotRunningStatus(true);
@@ -114,7 +150,9 @@ export async function processUpdate(update: any): Promise<void> {
   }
 
   try {
+    addLog("INFO", "Processing webhook update", update);
     await bot.handleUpdate(update);
+    addLog("INFO", "Successfully processed webhook update");
   } catch (error) {
     addLog("ERROR", "Error processing webhook update", error);
   }
@@ -157,5 +195,35 @@ export async function startBotFromSettings(): Promise<boolean> {
   } catch (error) {
     addLog("ERROR", "Failed to start bot from settings", error);
     return false;
+  }
+}
+
+// Add a function to manually test the webhook connection
+export async function testWebhook(webhookUrl: string): Promise<any> {
+  if (!bot) {
+    throw new Error("Bot not initialized");
+  }
+  
+  try {
+    // First check current webhook info
+    const webhookInfo = await bot.telegram.getWebhookInfo();
+    
+    // Delete any existing webhook
+    await bot.telegram.deleteWebhook();
+    
+    // Set the webhook
+    await bot.telegram.setWebhook(webhookUrl);
+    
+    // Get the new webhook info
+    const newWebhookInfo = await bot.telegram.getWebhookInfo();
+    
+    return {
+      previous: webhookInfo,
+      current: newWebhookInfo,
+      success: newWebhookInfo.url === webhookUrl
+    };
+  } catch (error) {
+    addLog("ERROR", "Test webhook failed", error);
+    throw error;
   }
 }
