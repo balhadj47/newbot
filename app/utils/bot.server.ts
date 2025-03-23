@@ -3,7 +3,10 @@ import {
   addLog, 
   addUser, 
   getBotSettings, 
-  getActiveCommands, 
+  getActiveCommands,
+  getCategories,
+  getProducts,
+  setCategoryById,
   setBotRunningStatus 
 } from "./db.server";
 
@@ -112,7 +115,7 @@ export async function initBot(token: string, webhookUrl?: string): Promise<void>
     // Register all command handlers from the database
     const commands = getActiveCommands();
     
-    // Register help command
+    // Register start command
     bot.command("start", async (ctx) => {
       const { id, username, first_name, last_name } = ctx.from;
       
@@ -148,10 +151,105 @@ export async function initBot(token: string, webhookUrl?: string): Promise<void>
       });
       
       try {
-        const response = await ctx.reply(`Available commands:\n${commandList || 'No commands available'}`);
+        const response = await ctx.reply(
+          `Available commands:\n${commandList || 'No commands available'}\n\n` +
+          `Special commands:\n` +
+          `/products - View all product categories`
+        );
         captureLog("SUCCESS", "Help command response sent", { responseMessage: response });
       } catch (error) {
         captureLog("ERROR", "Failed to send help command response", { error });
+      }
+    });
+
+    // Register products command
+    bot.command("products", async (ctx) => {
+      try {
+        const { id, username, first_name, last_name } = ctx.from;
+        
+        // Save user to database if they don't exist
+        addUser(id.toString(), username, first_name, last_name);
+        
+        captureLog("INFO", "Products command received", {
+          from: { id, username, first_name, last_name },
+          chat: ctx.chat
+        });
+        
+        const categories = getCategories().filter(cat => cat.is_active);
+        
+        if (categories.length === 0) {
+          const response = await ctx.reply("No product categories are available at the moment.");
+          captureLog("INFO", "Products command response - no categories", { response });
+          return;
+        }
+        
+        const categoryOptions = categories.map(category => [{
+          text: category.name,
+          callback_data: `category:${category.id}`
+        }]);
+        
+        const response = await ctx.reply("Please select a product category:", {
+          reply_markup: {
+            inline_keyboard: categoryOptions
+          }
+        });
+        
+        captureLog("SUCCESS", "Products command response sent with categories", { 
+          response,
+          categories: categories.map(c => ({ id: c.id, name: c.name }))
+        });
+      } catch (error) {
+        captureLog("ERROR", "Error handling /products command", {
+          error: error instanceof Error ? {
+            message: error.message,
+            stack: error.stack
+          } : error
+        });
+      }
+    });
+    
+    // Handle category selection callback
+    bot.action(/category:(\d+)/, async (ctx) => {
+      try {
+        const categoryId = parseInt(ctx.match[1], 10);
+        const { id, username } = ctx.from;
+        
+        captureLog("INFO", `Category selected: ${categoryId}`, {
+          from: { id, username },
+          categoryId
+        });
+        
+        const products = getProducts(categoryId).filter(product => product.is_active);
+        
+        if (products.length === 0) {
+          await ctx.answerCbQuery("No products available in this category");
+          await ctx.editMessageText("No products are available in this category at the moment.");
+          captureLog("INFO", "No products in selected category", { categoryId });
+          return;
+        }
+        
+        const category = getCategories().find(c => c.id === categoryId);
+        const productsList = products.map(p => `• ${p.name}: ${p.price.toLocaleString()} DA`).join('\n');
+        
+        await ctx.answerCbQuery();
+        await ctx.editMessageText(
+          `Products in category: *${category?.name}*\n\n${productsList}`,
+          { parse_mode: "Markdown" }
+        );
+        
+        captureLog("SUCCESS", "Category products displayed", {
+          categoryId,
+          categoryName: category?.name,
+          products: products.map(p => ({ id: p.id, name: p.name, price: p.price }))
+        });
+      } catch (error) {
+        captureLog("ERROR", "Error handling category selection", {
+          error: error instanceof Error ? {
+            message: error.message,
+            stack: error.stack
+          } : error,
+          callbackQuery: ctx.callbackQuery
+        });
       }
     });
 
@@ -207,7 +305,9 @@ export async function initBot(token: string, webhookUrl?: string): Promise<void>
         
         // For non-command messages, we can reply with a default message or process it
         if (ctx.message && 'text' in ctx.message && !ctx.message.text.startsWith('/')) {
-          const response = await ctx.reply("I only respond to commands. Use /help to see available commands.");
+          const response = await ctx.reply(
+            "I only respond to commands. Use /help to see available commands or /products to view our offerings."
+          );
           captureLog("INFO", "Sent non-command response", { responseMessage: response });
         }
       } catch (error) {
